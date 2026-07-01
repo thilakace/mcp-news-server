@@ -218,7 +218,13 @@ async function main() {
       console.error(`Received SSE connection request from client.`);
       res.setHeader('X-Accel-Buffering', 'no');
       res.setHeader('Cache-Control', 'no-cache');
-      const transport = new SSEServerTransport("/messages", res);
+      
+      // Use absolute URL for the messages endpoint to avoid client resolution issues
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+      const host = req.headers['x-forwarded-host'] || req.get('host');
+      const messagesUrl = `${protocol}://${host}/messages`;
+      
+      const transport = new SSEServerTransport(messagesUrl, res);
       activeTransports[transport.sessionId] = transport;
 
       res.on("close", () => {
