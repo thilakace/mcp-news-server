@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express from "express";
+import cors from "cors";
 import { z } from "zod";
 import mysql from "mysql2/promise";
 import fs from "fs/promises";
@@ -204,6 +205,7 @@ async function main() {
   } else {
     // Start Express HTTP + SSE server
     const app = express();
+    app.use(cors());
     app.use(express.json());
 
     // Root endpoint for verification
