@@ -214,6 +214,8 @@ async function main() {
     // GET /sse: Establish SSE connection
     app.get("/sse", async (req, res) => {
       console.error(`Received SSE connection request from client.`);
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.setHeader('Cache-Control', 'no-cache');
       const transport = new SSEServerTransport("/messages", res);
       activeTransports[transport.sessionId] = transport;
 
