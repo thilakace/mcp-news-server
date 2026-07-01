@@ -206,7 +206,6 @@ async function main() {
     // Start Express HTTP + SSE server
     const app = express();
     app.use(cors());
-    app.use(express.json());
 
     // Root endpoint for verification
     app.get("/", (req, res) => {
@@ -224,7 +223,7 @@ async function main() {
 
     // Route all HTTP methods (GET, POST, OPTIONS) to the transport
     app.all("/sse", async (req, res) => {
-      await transport.handleRequest(req, res, req.body);
+      await transport.handleRequest(req, res);
     });
 
     const port = parseInt(process.env.PORT || "3001", 10);
