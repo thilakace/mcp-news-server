@@ -126,17 +126,15 @@ async function saveToLocalJson(article: {
 }
 
 // Register the publish_article tool
-server.registerTool(
+server.tool(
   "publish_article",
+  "Publishes a news article directly to the website. Automatically routes to database, API, or local JSON based on environment configuration.",
   {
-    description: "Publishes a news article directly to the website. Automatically routes to database, API, or local JSON based on environment configuration.",
-    parameters: z.object({
-      title: z.string().describe("The headline/title of the news article"),
-      summary: z.string().describe("A brief 1-2 sentence summary of the news"),
-      content: z.string().describe("The complete body copy/text of the article"),
-      category: z.string().describe("The news section/category (e.g. Local Festivals, Infrastructure, Sports)"),
-      tags: z.array(z.string()).describe("Related tags or keywords for SEO classification"),
-    }),
+    title: z.string().describe("The headline/title of the news article"),
+    summary: z.string().describe("A brief 1-2 sentence summary of the news"),
+    content: z.string().describe("The complete body copy/text of the article"),
+    category: z.string().describe("The news section/category (e.g. Local Festivals, Infrastructure, Sports)"),
+    tags: z.array(z.string()).describe("Related tags or keywords for SEO classification"),
   },
   async ({ title, summary, content, category, tags }) => {
     const articlePayload = { title, summary, content, category, tags };
