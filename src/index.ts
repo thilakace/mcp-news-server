@@ -219,12 +219,9 @@ async function main() {
       res.setHeader('X-Accel-Buffering', 'no');
       res.setHeader('Cache-Control', 'no-cache');
       
-      // Use absolute URL for the messages endpoint to avoid client resolution issues
-      const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-      const host = req.headers['x-forwarded-host'] || req.get('host');
-      const messagesUrl = `${protocol}://${host}/messages`;
-      
-      const transport = new SSEServerTransport(messagesUrl, res);
+      // Relative endpoint; the client resolves it against the SSE origin.
+      // The SDK appends ?sessionId=<uuid> automatically.
+      const transport = new SSEServerTransport("/messages", res);
       activeTransports[transport.sessionId] = transport;
 
       res.on("close", () => {
@@ -242,7 +239,10 @@ async function main() {
       const transport = activeTransports[sessionId];
 
       if (transport) {
-        await transport.handlePostMessage(req, res);
+        // Pass the body parsed by express.json() so the SDK does not try to
+        // re-read an already-consumed request stream (which yields an empty
+        // body and a 400, breaking `initialize`).
+        await transport.handlePostMessage(req, res, req.body);
       } else {
         console.error(`Message received for unknown session: ${sessionId}`);
         res.status(400).send("No active session found for session ID");
