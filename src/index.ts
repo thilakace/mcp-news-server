@@ -17,11 +17,7 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize the MCP Server
-const server = new McpServer({
-  name: "mcp-news-server",
-  version: "1.0.0",
-});
+// Tool registration helper
 
 // Helper: Insert article into MySQL database
 async function insertIntoDatabase(article: {
@@ -127,70 +123,72 @@ async function saveToLocalJson(article: {
 }
 
 // Register the publish_article tool
-server.tool(
-  "publish_article",
-  "Publishes a news article directly to the website. Automatically routes to database, API, or local JSON based on environment configuration.",
-  {
-    title: z.string().describe("The headline/title of the news article"),
-    summary: z.string().describe("A brief 1-2 sentence summary of the news"),
-    content: z.string().describe("The complete body copy/text of the article"),
-    category: z.string().describe("The news section/category (e.g. Local Festivals, Infrastructure, Sports)"),
-    tags: z.array(z.string()).describe("Related tags or keywords for SEO classification"),
-  },
-  async ({ title, summary, content, category, tags }) => {
-    const articlePayload = { title, summary, content, category, tags };
+function registerTools(server: McpServer) {
+  server.tool(
+    "publish_article",
+    "Publishes a news article directly to the website. Automatically routes to database, API, or local JSON based on environment configuration.",
+    {
+      title: z.string().describe("The headline/title of the news article"),
+      summary: z.string().describe("A brief 1-2 sentence summary of the news"),
+      content: z.string().describe("The complete body copy/text of the article"),
+      category: z.string().describe("The news section/category (e.g. Local Festivals, Infrastructure, Sports)"),
+      tags: z.array(z.string()).describe("Related tags or keywords for SEO classification"),
+    },
+    async ({ title, summary, content, category, tags }) => {
+      const articlePayload = { title, summary, content, category, tags };
 
-    try {
-      // 1. Route to MySQL if configured
-      if (process.env.DB_USER && process.env.DB_NAME) {
-        const dbResult = await insertIntoDatabase(articlePayload);
+      try {
+        // 1. Route to MySQL if configured
+        if (process.env.DB_USER && process.env.DB_NAME) {
+          const dbResult = await insertIntoDatabase(articlePayload);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `✅ Article successfully inserted into MySQL database!\nTitle: "${title}"`,
+              },
+            ],
+          };
+        }
+
+        // 2. Route to REST API if configured
+        if (process.env.API_ENDPOINT) {
+          const apiResult = await pushToApiEndpoint(articlePayload);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `✅ Article successfully pushed to API Endpoint!\nResponse: ${JSON.stringify(apiResult)}`,
+              },
+            ],
+          };
+        }
+
+        // 3. Fallback: Save to local JSON file (useful for initial local testing)
+        const localResult = await saveToLocalJson(articlePayload);
         return {
           content: [
             {
               type: "text",
-              text: `✅ Article successfully inserted into MySQL database!\nTitle: "${title}"`,
+              text: `ℹ️ [Testing Mode] No database or API credentials found in .env.\nSaved article locally to: ${localResult.filePath}\nArticle ID: ${localResult.articleId}\nTitle: "${title}"`,
             },
           ],
         };
-      }
-
-      // 2. Route to REST API if configured
-      if (process.env.API_ENDPOINT) {
-        const apiResult = await pushToApiEndpoint(articlePayload);
+      } catch (error: any) {
+        console.error("Publish tool error details:", error);
         return {
+          isError: true,
           content: [
             {
               type: "text",
-              text: `✅ Article successfully pushed to API Endpoint!\nResponse: ${JSON.stringify(apiResult)}`,
+              text: `❌ Failed to publish article: ${error.message}`,
             },
           ],
         };
       }
-
-      // 3. Fallback: Save to local JSON file (useful for initial local testing)
-      const localResult = await saveToLocalJson(articlePayload);
-      return {
-        content: [
-          {
-            type: "text",
-            text: `ℹ️ [Testing Mode] No database or API credentials found in .env.\nSaved article locally to: ${localResult.filePath}\nArticle ID: ${localResult.articleId}\nTitle: "${title}"`,
-          },
-        ],
-      };
-    } catch (error: any) {
-      console.error("Publish tool error details:", error);
-      return {
-        isError: true,
-        content: [
-          {
-            type: "text",
-            text: `❌ Failed to publish article: ${error.message}`,
-          },
-        ],
-      };
     }
-  }
-);
+  );
+}
 
 // Map to hold active SSE transport sessions
 const activeTransports: { [sessionId: string]: SSEServerTransport } = {};
@@ -199,8 +197,13 @@ const activeTransports: { [sessionId: string]: SSEServerTransport } = {};
 async function main() {
   // Check if stdio flag is passed
   if (process.argv.includes("--stdio")) {
+    const stdioServer = new McpServer({
+      name: "mcp-news-server",
+      version: "1.0.0",
+    });
+    registerTools(stdioServer);
     const transport = new StdioServerTransport();
-    await server.connect(transport);
+    await stdioServer.connect(transport);
     console.error("MCP News Server running on stdio transport...");
   } else {
     // Start Express HTTP + SSE server
@@ -229,7 +232,13 @@ async function main() {
         delete activeTransports[transport.sessionId];
       });
 
-      await server.connect(transport);
+      const sessionServer = new McpServer({
+        name: "mcp-news-server",
+        version: "1.0.0",
+      });
+      registerTools(sessionServer);
+
+      await sessionServer.connect(transport);
       console.error(`SSE session ${transport.sessionId} successfully connected.`);
     });
 
