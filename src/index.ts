@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
 import cors from "cors";
 import { z } from "zod";
@@ -190,9 +190,6 @@ function registerTools(server: McpServer) {
   );
 }
 
-// Map to hold active SSE transport sessions
-const activeTransports: { [sessionId: string]: SSEServerTransport } = {};
-
 // Start the server
 async function main() {
   // Check if stdio flag is passed
@@ -216,53 +213,24 @@ async function main() {
       res.send("MCP News Server is running. Connect via /sse");
     });
 
-    // GET /sse: Establish SSE connection
-    app.get("/sse", async (req, res) => {
-      console.error(`Received SSE connection request from client.`);
-      res.setHeader('X-Accel-Buffering', 'no');
-      res.setHeader('Cache-Control', 'no-cache');
-      
-      // Relative endpoint; the client resolves it against the SSE origin.
-      // The SDK appends ?sessionId=<uuid> automatically.
-      const transport = new SSEServerTransport("/messages", res);
-      activeTransports[transport.sessionId] = transport;
-
-      res.on("close", () => {
-        console.error(`SSE session ${transport.sessionId} closed.`);
-        delete activeTransports[transport.sessionId];
-      });
-
-      const sessionServer = new McpServer({
-        name: "mcp-news-server",
-        version: "1.0.0",
-      });
-      registerTools(sessionServer);
-
-      await sessionServer.connect(transport);
-      console.error(`SSE session ${transport.sessionId} successfully connected.`);
+    const server = new McpServer({
+      name: "mcp-news-server",
+      version: "1.0.0",
     });
+    registerTools(server);
 
-    // POST /messages: Handle incoming JSON-RPC requests
-    app.post("/messages", async (req, res) => {
-      const sessionId = req.query.sessionId as string;
-      const transport = activeTransports[sessionId];
+    const transport = new StreamableHTTPServerTransport();
+    await server.connect(transport);
 
-      if (transport) {
-        // Pass the body parsed by express.json() so the SDK does not try to
-        // re-read an already-consumed request stream (which yields an empty
-        // body and a 400, breaking `initialize`).
-        await transport.handlePostMessage(req, res, req.body);
-      } else {
-        console.error(`Message received for unknown session: ${sessionId}`);
-        res.status(400).send("No active session found for session ID");
-      }
+    // Route all HTTP methods (GET, POST, OPTIONS) to the transport
+    app.all("/sse", async (req, res) => {
+      await transport.handleRequest(req, res, req.body);
     });
 
     const port = parseInt(process.env.PORT || "3001", 10);
     app.listen(port, () => {
-      console.log(`MCP News Server running on HTTP/SSE at http://localhost:${port}`);
+      console.log(`MCP News Server running on HTTP/Streamable HTTP at http://localhost:${port}`);
       console.log(`- Connection URL: http://localhost:${port}/sse`);
-      console.log(`- Message URL: http://localhost:${port}/messages`);
     });
   }
 }
