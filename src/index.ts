@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import express from "express";
 import { z } from "zod";
 import mysql from "mysql2/promise";
 import fs from "fs/promises";
@@ -191,11 +193,61 @@ server.registerTool(
   }
 );
 
-// Start the server using Standard Input/Output (stdio) transport
+// Map to hold active SSE transport sessions
+const activeTransports: { [sessionId: string]: SSEServerTransport } = {};
+
+// Start the server
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("MCP News Server running on stdio transport...");
+  // Check if stdio flag is passed
+  if (process.argv.includes("--stdio")) {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error("MCP News Server running on stdio transport...");
+  } else {
+    // Start Express HTTP + SSE server
+    const app = express();
+    app.use(express.json());
+
+    // Root endpoint for verification
+    app.get("/", (req, res) => {
+      res.send("MCP News Server is running. Connect via /sse");
+    });
+
+    // GET /sse: Establish SSE connection
+    app.get("/sse", async (req, res) => {
+      console.error(`Received SSE connection request from client.`);
+      const transport = new SSEServerTransport("/messages", res);
+      activeTransports[transport.sessionId] = transport;
+
+      res.on("close", () => {
+        console.error(`SSE session ${transport.sessionId} closed.`);
+        delete activeTransports[transport.sessionId];
+      });
+
+      await server.connect(transport);
+      console.error(`SSE session ${transport.sessionId} successfully connected.`);
+    });
+
+    // POST /messages: Handle incoming JSON-RPC requests
+    app.post("/messages", async (req, res) => {
+      const sessionId = req.query.sessionId as string;
+      const transport = activeTransports[sessionId];
+
+      if (transport) {
+        await transport.handlePostMessage(req, res);
+      } else {
+        console.error(`Message received for unknown session: ${sessionId}`);
+        res.status(400).send("No active session found for session ID");
+      }
+    });
+
+    const port = parseInt(process.env.PORT || "3001", 10);
+    app.listen(port, () => {
+      console.log(`MCP News Server running on HTTP/SSE at http://localhost:${port}`);
+      console.log(`- Connection URL: http://localhost:${port}/sse`);
+      console.log(`- Message URL: http://localhost:${port}/messages`);
+    });
+  }
 }
 
 main().catch((error) => {
